@@ -1,25 +1,28 @@
 from pydantic import BaseModel, Field
 from jarvislabs import App, Server, S3Handler
 import torch
-import numpy as np
 from PIL import Image
 import os
 from RealESRGAN import RealESRGAN
 from diffusers.utils import load_image
 from torchvision import transforms
 import subprocess
+import requests
+from io import BytesIO
+
+
 
 app = App("Real-ESRGAN")
 
-model_path = "models/"
-weight_file = os.path.join(model_path, "RealESRGAN_x4plus.pth")
+# Define paths directly in the code for simplicity
+weight_file = "models/RealESRGAN_x4plus.pth"
 
-# # Download weights if they don't exist
-# if not os.path.exists(weight_file):
-#     print("Downloading Real-ESRGAN weights...")
-#     subprocess.run(["wget", "-O", weight_file, "https://your_wget_link_for_weights"])
-# else:
-#     print("Weights already downloaded.")
+def open_image_from_url(url):
+    response = requests.get(url)
+    if response.status_code == 200:
+        image = Image.open(BytesIO(response.content))
+        return image
+    return None
 
 @app
 class ESRGAN:
@@ -34,28 +37,34 @@ class ESRGAN:
             raise FileNotFoundError(f"Model weights not found at {weight_file}")
 
         self.realesrgan.load_weights(weight_file)
-        #self.realesrgan.eval()  # Set to evaluation mode
 
     @app.api_endpoint
     async def predict(self, url: str):
-        images = []  # Initialize an empty list to store processed images
-
-        # Change from 'request.image_url' to 'url'
-        image = load_image(url)
-
         try:
-            with torch.no_grad():  # Fix indentation
-                # Process the single loaded image instead of iterating over a directory
-                sr_image = self.realesrgan.predict(image)  # Adjust to the correct method call
-                images.append(sr_image)  # Collect the processed image
+            # Load and preprocess the image from the URL
+            #image = load_image(url).convert('RGB')  # Ensure it's in RGB format
+            image = open_image_from_url(url).convert('RGB')
 
+            
+            # Convert the image to a tensor
+            transform = transforms.ToTensor()
+            image_tensor = transform(image).unsqueeze(0)  # Add batch dimension
+
+            # Perform super-resolution with RealESRGAN
+            with torch.no_grad():
+                sr_image_tensor = self.realesrgan.predict(image_tensor)  # Use the appropriate method
+            
+            # Convert the result back to a PIL image for saving/upload
+            sr_image = transforms.ToPILImage()(sr_image_tensor.squeeze(0))  # Remove batch dimension
+
+            # Upload the processed image to S3
             s3 = S3Handler()
-            upload_url = await s3.upload_images(images)
+            upload_url = await s3.upload_images([sr_image])
 
             return {'images': upload_url}
 
         except Exception as e:
-            print(str(e))
+            print(f"Error: {e}")
             return {"error": f"Image generation failed: {str(e)}"}
 
 # Run the FastAPI application
