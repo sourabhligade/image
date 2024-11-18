@@ -12,7 +12,6 @@ import PageHeader from '@/components/PageHeader'
 import CopyButton from '@/components/CopyButton'
 import NoVm from '@/components/NoVm'
 import { Loader, Edit, Trash2, Pause, Play, Plus } from 'lucide-react'
-
 const deleteModalContent = {
   heading: 'Are you sure you want to delete this Instance',
   subheading:
